@@ -25,7 +25,8 @@ PATH.mkdir(parents=True, exist_ok=True)
 
 class Instagram:
 
-    def __init__(self, username, maxtasks=200):
+    def __init__(self, username, loop, maxtasks=200):
+        self.loop = loop
         self.username = username
         self.maxtasks = maxtasks  # 最大任务数
         self.queue = asyncio.Queue(maxsize=maxtasks * 2)
@@ -160,11 +161,14 @@ class Instagram:
         print('Total %r photos.' % self.count)
         self.producer = asyncio.create_task(self.produce_download_urls())
         print('Downloading...', end='', flush=True)
-        await asyncio.gather(*(self.download() for _ in range(self.maxtasks)))
+        futures = [asyncio.ensure_future(self.download())
+                   for _ in range(self.maxtasks)]
+        r = await asyncio.gather(*(futures))#.add_done_callback(self.loop.close())
+        print(r)
 
 
 async def main():
-    ins = Instagram(USERNAME)
+    ins = Instagram(USERNAME, loop)
     try:
         await ins.run()
     finally:
@@ -177,22 +181,27 @@ def check(_):
                  proxies={'http': 'http://localhost:80001', 'https': 'https://localhost:8001'}) as resp:
         pattern = '"edge_owner_to_timeline_media":.?{"count":(.*?),"page_info"'
         count = int(re.findall(pattern, resp.text)[0])
-        while True:
+        while not loop.is_closed():
             files = len(os.listdir(PATH))
             print('Check files:%r' % files)
             if files == count:
+                for f in os.listdir(PATH):
+                    if os.path.getsize(PATH / f)/1024 > 10:continue
                 # print('Total %r photos download done.' % count)
                 print('\nProduce done, Total %r photos, plz wait save done :)' % count)
-                sys.exit(0)
+                _.stop()
+                _.close()
+                exit(1)
 
 
 if __name__ == '__main__':
     try:
-        p = multiprocessing.Process(target=check, args=(0,))
+        loop = asyncio.get_event_loop()
+        p = multiprocessing.Process(target=check, args=(loop,))
         p.start()
         future = asyncio.ensure_future(main())
-        loop = asyncio.get_event_loop()
         loop.run_until_complete(future)
-        loop.close()
+        # loop.close()
+        # loop.run_forever()
     except KeyboardInterrupt:
         pass
